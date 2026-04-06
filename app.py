@@ -1,19 +1,368 @@
 """
-Patient Appointment Tracker - Streamlit MVP
-Main application file with authentication, role-based dashboards, and CRUD operations
+Patient Appointment Tracker - Streamlit MVP (All-in-One)
+Complete application with authentication, role-based dashboards, and CRUD operations
 """
 
 import streamlit as st
 from datetime import datetime, timedelta
 import json
+import hashlib
+import os
+from typing import List, Dict, Optional
 
-from auth import register_user, login_user
-from data_manager import (
-    create_time_slot, get_doctor_schedule, get_available_slots, delete_time_slot,
-    book_appointment, get_patient_appointments, get_doctor_appointments,
-    cancel_appointment, reschedule_appointment, update_appointment_status, update_appointment_notes
-)
-from chatbot import get_chatbot_response
+# ============ FILE CONSTANTS ============
+USERS_FILE = "users.json"
+APPOINTMENTS_FILE = "appointments.json"
+SCHEDULES_FILE = "schedules.json"
+
+
+# ============ AUTHENTICATION FUNCTIONS ============
+
+def hash_password(password: str) -> str:
+    """Hash a password using SHA256"""
+    return hashlib.sha256(password.encode()).hexdigest()
+
+
+def load_users() -> dict:
+    """Load users from JSON file"""
+    if os.path.exists(USERS_FILE):
+        with open(USERS_FILE, "r") as f:
+            return json.load(f)
+    return {"users": []}
+
+
+def save_users(users_data: dict) -> None:
+    """Save users to JSON file"""
+    with open(USERS_FILE, "w") as f:
+        json.dump(users_data, f, indent=2)
+
+
+def user_exists(email: str) -> bool:
+    """Check if a user already exists"""
+    users_data = load_users()
+    return any(user["email"] == email for user in users_data["users"])
+
+
+def register_user(email: str, password: str, full_name: str, role: str) -> dict:
+    """
+    Register a new user
+    
+    Args:
+        email: User email
+        password: User password
+        full_name: User's full name
+        role: "doctor" or "patient"
+    
+    Returns:
+        dict with success status and message
+    """
+    if user_exists(email):
+        return {"success": False, "message": "Email already registered"}
+    
+    if role not in ["doctor", "patient"]:
+        return {"success": False, "message": "Invalid role"}
+    
+    users_data = load_users()
+    new_user = {
+        "email": email,
+        "password_hash": hash_password(password),
+        "full_name": full_name,
+        "role": role,
+        "created_at": datetime.now().isoformat()
+    }
+    
+    users_data["users"].append(new_user)
+    save_users(users_data)
+    
+    return {"success": True, "message": "Registration successful! Please log in."}
+
+
+def login_user(email: str, password: str) -> dict:
+    """
+    Authenticate a user
+    
+    Args:
+        email: User email
+        password: User password
+    
+    Returns:
+        dict with success status, user data if successful
+    """
+    users_data = load_users()
+    password_hash = hash_password(password)
+    
+    for user in users_data["users"]:
+        if user["email"] == email and user["password_hash"] == password_hash:
+            return {
+                "success": True,
+                "user": {
+                    "email": user["email"],
+                    "full_name": user["full_name"],
+                    "role": user["role"]
+                }
+            }
+    
+    return {"success": False, "message": "Invalid email or password"}
+
+
+# ============ DATA MANAGEMENT FUNCTIONS ============
+
+def load_appointments() -> dict:
+    """Load appointments from JSON file"""
+    if os.path.exists(APPOINTMENTS_FILE):
+        with open(APPOINTMENTS_FILE, "r") as f:
+            return json.load(f)
+    return {"appointments": []}
+
+
+def save_appointments(data: dict) -> None:
+    """Save appointments to JSON file"""
+    with open(APPOINTMENTS_FILE, "w") as f:
+        json.dump(data, f, indent=2)
+
+
+def load_schedules() -> dict:
+    """Load doctor schedules from JSON file"""
+    if os.path.exists(SCHEDULES_FILE):
+        with open(SCHEDULES_FILE, "r") as f:
+            return json.load(f)
+    return {"schedules": []}
+
+
+def save_schedules(data: dict) -> None:
+    """Save doctor schedules to JSON file"""
+    with open(SCHEDULES_FILE, "w") as f:
+        json.dump(data, f, indent=2)
+
+
+# ========== SCHEDULE MANAGEMENT (Doctor/Admin CRUD) ==========
+
+def create_time_slot(doctor_email: str, date: str, time: str, duration_minutes: int = 30) -> dict:
+    """Create an available time slot for a doctor"""
+    schedules = load_schedules()
+    slot_id = f"{doctor_email}_{date}_{time}".replace(" ", "_").replace(":", "-")
+    
+    new_slot = {
+        "slot_id": slot_id,
+        "doctor_email": doctor_email,
+        "date": date,
+        "time": time,
+        "duration_minutes": duration_minutes,
+        "status": "available",
+        "created_at": datetime.now().isoformat()
+    }
+    
+    schedules["schedules"].append(new_slot)
+    save_schedules(schedules)
+    
+    return {"success": True, "message": "Time slot created", "slot_id": slot_id}
+
+
+def get_doctor_schedule(doctor_email: str) -> List[Dict]:
+    """Get all time slots for a specific doctor"""
+    schedules = load_schedules()
+    return [s for s in schedules["schedules"] if s["doctor_email"] == doctor_email]
+
+
+def get_available_slots(doctor_email: str) -> List[Dict]:
+    """Get only available time slots for a doctor"""
+    schedules = load_schedules()
+    return [s for s in schedules["schedules"] 
+            if s["doctor_email"] == doctor_email and s["status"] == "available"]
+
+
+def delete_time_slot(slot_id: str) -> dict:
+    """Delete a time slot"""
+    schedules = load_schedules()
+    schedules["schedules"] = [s for s in schedules["schedules"] if s["slot_id"] != slot_id]
+    save_schedules(schedules)
+    return {"success": True, "message": "Time slot deleted"}
+
+
+# ========== APPOINTMENT MANAGEMENT (Both Roles CRUD) ==========
+
+def book_appointment(patient_email: str, patient_name: str, slot_id: str) -> dict:
+    """Book an appointment for a patient"""
+    schedules = load_schedules()
+    
+    slot = next((s for s in schedules["schedules"] if s["slot_id"] == slot_id), None)
+    if not slot or slot["status"] != "available":
+        return {"success": False, "message": "Time slot not available"}
+    
+    appointments = load_appointments()
+    appointment_id = f"APT_{len(appointments['appointments']) + 1}_{datetime.now().timestamp()}"
+    
+    new_appointment = {
+        "appointment_id": appointment_id,
+        "patient_email": patient_email,
+        "patient_name": patient_name,
+        "doctor_email": slot["doctor_email"],
+        "date": slot["date"],
+        "time": slot["time"],
+        "duration_minutes": slot["duration_minutes"],
+        "status": "booked",
+        "notes": "",
+        "booked_at": datetime.now().isoformat()
+    }
+    
+    appointments["appointments"].append(new_appointment)
+    save_appointments(appointments)
+    
+    slot["status"] = "booked"
+    save_schedules(schedules)
+    
+    return {"success": True, "message": "Appointment booked successfully", 
+            "appointment_id": appointment_id}
+
+
+def get_patient_appointments(patient_email: str) -> List[Dict]:
+    """Get all appointments for a specific patient"""
+    appointments = load_appointments()
+    return [a for a in appointments["appointments"] if a["patient_email"] == patient_email]
+
+
+def get_doctor_appointments(doctor_email: str) -> List[Dict]:
+    """Get all appointments for a specific doctor's daily roster"""
+    appointments = load_appointments()
+    return [a for a in appointments["appointments"] if a["doctor_email"] == doctor_email]
+
+
+def cancel_appointment(appointment_id: str) -> dict:
+    """Cancel an appointment and free up the slot"""
+    appointments = load_appointments()
+    schedules = load_schedules()
+    
+    appointment = next((a for a in appointments["appointments"] 
+                       if a["appointment_id"] == appointment_id), None)
+    
+    if not appointment:
+        return {"success": False, "message": "Appointment not found"}
+    
+    appointment["status"] = "cancelled"
+    save_appointments(appointments)
+    
+    slot_id = f"{appointment['doctor_email']}_{appointment['date']}_{appointment['time']}".replace(" ", "_").replace(":", "-")
+    for slot in schedules["schedules"]:
+        if slot["slot_id"] == slot_id:
+            slot["status"] = "available"
+    
+    save_schedules(schedules)
+    
+    return {"success": True, "message": "Appointment cancelled"}
+
+
+def reschedule_appointment(appointment_id: str, new_slot_id: str) -> dict:
+    """Reschedule an appointment to a new time slot"""
+    appointments = load_appointments()
+    schedules = load_schedules()
+    
+    appointment = next((a for a in appointments["appointments"] 
+                       if a["appointment_id"] == appointment_id), None)
+    
+    if not appointment:
+        return {"success": False, "message": "Appointment not found"}
+    
+    new_slot = next((s for s in schedules["schedules"] if s["slot_id"] == new_slot_id), None)
+    
+    if not new_slot or new_slot["status"] != "available":
+        return {"success": False, "message": "New time slot not available"}
+    
+    old_slot_id = f"{appointment['doctor_email']}_{appointment['date']}_{appointment['time']}".replace(" ", "_").replace(":", "-")
+    for slot in schedules["schedules"]:
+        if slot["slot_id"] == old_slot_id:
+            slot["status"] = "available"
+    
+    appointment["date"] = new_slot["date"]
+    appointment["time"] = new_slot["time"]
+    appointment["duration_minutes"] = new_slot["duration_minutes"]
+    
+    new_slot["status"] = "booked"
+    
+    save_appointments(appointments)
+    save_schedules(schedules)
+    
+    return {"success": True, "message": "Appointment rescheduled successfully"}
+
+
+def update_appointment_status(appointment_id: str, new_status: str) -> dict:
+    """Update appointment status (e.g., Completed, No-Show)"""
+    appointments = load_appointments()
+    
+    appointment = next((a for a in appointments["appointments"] 
+                       if a["appointment_id"] == appointment_id), None)
+    
+    if not appointment:
+        return {"success": False, "message": "Appointment not found"}
+    
+    appointment["status"] = new_status
+    save_appointments(appointments)
+    
+    return {"success": True, "message": f"Appointment status updated to {new_status}"}
+
+
+def update_appointment_notes(appointment_id: str, notes: str) -> dict:
+    """Update appointment notes"""
+    appointments = load_appointments()
+    
+    appointment = next((a for a in appointments["appointments"] 
+                       if a["appointment_id"] == appointment_id), None)
+    
+    if not appointment:
+        return {"success": False, "message": "Appointment not found"}
+    
+    appointment["notes"] = notes
+    save_appointments(appointments)
+    
+    return {"success": True, "message": "Notes updated"}
+
+
+# ============ CHATBOT FUNCTION ============
+
+def get_chatbot_response(user_query: str, user_email: str, user_name: str) -> str:
+    """Get a hardcoded response from the chatbot based on user query (Phase 1: 5 responses)"""
+    query = user_query.lower().strip()
+    
+    # Response 1: When is my next appointment?
+    if any(keyword in query for keyword in ["next appointment", "when is my appointment", 
+                                              "schedule", "my appointment", "upcoming"]):
+        appointments = get_patient_appointments(user_email)
+        upcoming = [a for a in appointments if a["status"] in ["booked"]]
+        
+        if upcoming:
+            apt = upcoming[0]
+            return f"Your next appointment is scheduled for {apt['date']} at {apt['time']} with Dr. {apt['doctor_email']}. Duration: {apt['duration_minutes']} minutes."
+        else:
+            return f"You don't have any upcoming appointments scheduled. Please book one through your dashboard!"
+    
+    # Response 2: How do I cancel my appointment?
+    elif any(keyword in query for keyword in ["cancel", "how to cancel", "remove appointment", 
+                                                "delete appointment"]):
+        return "To cancel your appointment, go to your Dashboard, find your booked appointment in the 'My Appointments' section, and click the 'Cancel' button. Your time slot will be freed up and available for other patients."
+    
+    # Response 3: What are the clinic hours?
+    elif any(keyword in query for keyword in ["hours", "clinic hours", "when open", "available hours", 
+                                                "operating hours"]):
+        return "Our clinic operates Monday through Friday, 9:00 AM to 5:00 PM. We are closed on weekends and public holidays. Please book your appointment within these hours."
+    
+    # Response 4: How do I reschedule?
+    elif any(keyword in query for keyword in ["reschedule", "change appointment", "move appointment", 
+                                                "different time", "reschedule appointment"]):
+        return "To reschedule your appointment, go to your Dashboard, select the appointment you want to change, and click 'Reschedule'. Choose from the available time slots and confirm your new appointment time."
+    
+    # Response 5: What do I need to bring?
+    elif any(keyword in query for keyword in ["bring", "prepare", "what to bring", "documents", 
+                                                "insurance", "id required"]):
+        return "Please bring your valid ID and insurance card to your appointment. Also, bring any relevant medical records or previous test results if available. Arrive 10 minutes early to check in."
+    
+    # Default response
+    else:
+        return f"Hi {user_name}! I'm the clinic's AI assistant. I can help you with questions about:\n" \
+               "1. When is my next appointment?\n" \
+               "2. How do I cancel my appointment?\n" \
+               "3. What are the clinic hours?\n" \
+               "4. How do I reschedule?\n" \
+               "5. What do I need to bring?\n\n" \
+               "Please ask me any of these questions, or contact our staff directly for more information!"
 
 
 # ============ PAGE CONFIG AND INITIALIZATION ============
@@ -133,7 +482,6 @@ def patient_dashboard():
         st.subheader("Book an Appointment")
         
         # Get available slots from doctors
-        from data_manager import load_schedules
         schedules = load_schedules()
         available_slots = [s for s in schedules["schedules"] if s["status"] == "available"]
         
