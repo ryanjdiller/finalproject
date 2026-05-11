@@ -1,0 +1,16 @@
+{
+  "appointments": [
+    {
+      "appointment_id": "APT_1_1778539228.583834",
+      "patient_email": "patient123@clinic.com",
+      "patient_name": "Johnie",
+      "doctor_email": "doctor123@clinic.com",
+      "date": "2026-05-25",
+      "time": "13:30",
+      "duration_minutes": 30,
+      "status": "booked",
+      "notes": "",
+      "booked_at": "2026-05-11T18:40:28.583834"
+    }
+  ]
+}

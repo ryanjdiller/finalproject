@@ -778,8 +778,9 @@ def patient_dashboard():
             st.session_state.chat_messages = []
             logs = ChatLoggerStore(CHAT_LOGS_FILE).load_logs()
             for log in logs:
-                st.session_state.chat_messages.append({"role": "user", "content": log["user_message"]})
-                st.session_state.chat_messages.append({"role": "assistant", "content": log["assistant_message"]})
+                if isinstance(log, dict) and "user_message" in log and "assistant_message" in log:
+                    st.session_state.chat_messages.append({"role": "user", "content": log["user_message"]})
+                    st.session_state.chat_messages.append({"role": "assistant", "content": log["assistant_message"]})
 
         chat_container = st.container()
         with chat_container:

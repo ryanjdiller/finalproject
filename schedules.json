@@ -1,0 +1,67 @@
+{
+  "schedules": [
+    {
+      "slot_id": "doctor123@clinic.com_2026-05-11_09-00",
+      "doctor_email": "doctor123@clinic.com",
+      "date": "2026-05-11",
+      "time": "09:00",
+      "duration_minutes": 30,
+      "status": "available",
+      "created_at": "2026-05-11T18:39:12.902839"
+    },
+    {
+      "slot_id": "doctor123@clinic.com_2026-05-28_09-00",
+      "doctor_email": "doctor123@clinic.com",
+      "date": "2026-05-28",
+      "time": "09:00",
+      "duration_minutes": 30,
+      "status": "available",
+      "created_at": "2026-05-11T18:39:16.092231"
+    },
+    {
+      "slot_id": "doctor123@clinic.com_2026-05-15_09-00",
+      "doctor_email": "doctor123@clinic.com",
+      "date": "2026-05-15",
+      "time": "09:00",
+      "duration_minutes": 30,
+      "status": "available",
+      "created_at": "2026-05-11T18:39:22.319205"
+    },
+    {
+      "slot_id": "doctor123@clinic.com_2026-05-18_13-30",
+      "doctor_email": "doctor123@clinic.com",
+      "date": "2026-05-18",
+      "time": "13:30",
+      "duration_minutes": 30,
+      "status": "available",
+      "created_at": "2026-05-11T18:39:39.261142"
+    },
+    {
+      "slot_id": "doctor123@clinic.com_2026-05-25_13-30",
+      "doctor_email": "doctor123@clinic.com",
+      "date": "2026-05-25",
+      "time": "13:30",
+      "duration_minutes": 30,
+      "status": "booked",
+      "created_at": "2026-05-11T18:39:39.283722"
+    },
+    {
+      "slot_id": "doctor123@clinic.com_2026-06-01_13-30",
+      "doctor_email": "doctor123@clinic.com",
+      "date": "2026-06-01",
+      "time": "13:30",
+      "duration_minutes": 30,
+      "status": "available",
+      "created_at": "2026-05-11T18:39:39.308817"
+    },
+    {
+      "slot_id": "doctor123@clinic.com_2026-06-08_13-30",
+      "doctor_email": "doctor123@clinic.com",
+      "date": "2026-06-08",
+      "time": "13:30",
+      "duration_minutes": 30,
+      "status": "available",
+      "created_at": "2026-05-11T18:39:39.329318"
+    }
+  ]
+}
