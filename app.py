@@ -8,12 +8,47 @@ from datetime import datetime, timedelta
 import json
 import hashlib
 import os
+from pathlib import Path
 from typing import List, Dict, Optional
+from dotenv import load_dotenv
+import openai
+from openai import OpenAI
 
 # ============ FILE CONSTANTS ============
 USERS_FILE = "users.json"
 APPOINTMENTS_FILE = "appointments.json"
 SCHEDULES_FILE = "schedules.json"
+CHAT_LOGS_FILE = "chat_logs.json"
+
+load_dotenv()
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+PRIMARY_COLOR = "#0f4c75"
+SECONDARY_COLOR = "#1f6f8b"
+BACKGROUND_COLOR = "#f7f9fb"
+CARD_COLOR = "#ffffff"
+TEXT_COLOR = "#0f172a"
+MUTED_COLOR = "#52606d"
+
+
+def inject_global_styles():
+    st.markdown(
+        f"""
+        <style>
+        html, body, [data-testid="stAppViewContainer"] {{background: {BACKGROUND_COLOR}; color: {TEXT_COLOR};}}
+        [data-testid="stSidebar"] {{background: linear-gradient(180deg, {PRIMARY_COLOR}, {SECONDARY_COLOR}) !important; color: #ffffff;}}
+        [data-testid="stSidebar"] .css-1d391kg {{background: transparent !important; box-shadow:none !important;}}
+        [data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3, [data-testid="stSidebar"] p, [data-testid="stSidebar"] label {{color: #f5f9ff !important;}}
+        .section-header {{padding: 24px; border-radius: 24px; background: linear-gradient(135deg, {PRIMARY_COLOR}, {SECONDARY_COLOR}); color: white; margin-bottom: 18px;}}
+        .section-header h1 {{margin: 0; font-size: 2rem;}}
+        .section-header p {{margin: 8px 0 0; color: rgba(255,255,255,0.87); font-size: 1rem;}}
+        .section-card {{background: {CARD_COLOR}; border-radius: 24px; padding: 24px; box-shadow: 0 18px 45px rgba(15, 20, 42, 0.08); margin-bottom: 22px;}}
+        .stButton>button {{border-radius: 999px !important;}}
+        .stTextInput>div>div>input, .stTextArea>div>div>textarea, .stSelectbox>div>div>div>div, .stDateInput>div>div>input, .stTimeInput>div>div>input, .stNumberInput>div>div>input {{border-radius: 14px !important; border: 1px solid #dbe4ee !important; background: #f8fafc !important;}}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 # ============ AUTHENTICATION FUNCTIONS ============
@@ -134,6 +169,101 @@ def save_schedules(data: dict) -> None:
     with open(SCHEDULES_FILE, "w") as f:
         json.dump(data, f, indent=2)
 
+# ============ AI CHATBOT SUPPORT ============
+
+def is_openai_configured() -> bool:
+    return bool(OPENAI_API_KEY and OPENAI_API_KEY.strip())
+
+
+class AppointmentDataStore:
+    def __init__(self, patient_email: str):
+        self.patient_email = patient_email
+
+    def get_context(self) -> str:
+        appointments = get_patient_appointments(self.patient_email)
+        schedules = load_schedules()
+        context = {
+            "patient_email": self.patient_email,
+            "appointments": appointments,
+            "available_schedules": [
+                s for s in schedules["schedules"] if s["status"] == "available"
+            ],
+            "clinic_info": {
+                "name": "Patient Appointment Tracker Clinic",
+                "hours": "Monday to Friday, 9:00 AM to 5:00 PM",
+                "policies": [
+                    "Bring a valid ID and insurance card",
+                    "Arrive 10 minutes early",
+                    "Contact staff if you need to reschedule"
+                ]
+            }
+        }
+        return json.dumps(context, indent=2)
+
+
+class ChatLoggerStore:
+    def __init__(self, filepath: str):
+        self.filepath = Path(filepath)
+
+    def load_logs(self) -> list:
+        if self.filepath.exists():
+            with open(self.filepath, "r") as f:
+                return json.load(f)
+        return []
+
+    def save_logs(self, logs: list) -> None:
+        with open(self.filepath, "w") as f:
+            json.dump(logs, f, indent=2)
+
+
+class ClinicAssistantBot:
+    def __init__(self, api_key: str, context_data: str):
+        self.client = OpenAI(api_key=api_key)
+        self.context_data = context_data
+
+    def build_ai_prompt(self) -> str:
+        return (
+            "You are a helpful clinic assistant. Answer user questions based ONLY on the appointment "
+            "data and clinic information provided below. Do not invent information. If the answer is not "
+            "contained in the provided data, respond with a helpful message that you do not have enough "
+            "information and suggest the user contact clinic staff.\n\n"
+            "CLINIC CONTEXT:\n"
+            f"{self.context_data}"
+        )
+
+    def get_ai_response(self, chat_history: list) -> str:
+        system_message = {"role": "system", "content": self.build_ai_prompt()}
+        messages = [system_message] + chat_history
+        try:
+            response = self.client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=messages,
+                temperature=0.2,
+                max_tokens=300
+            )
+            return response.choices[0].message["content"].strip()
+        except openai.RateLimitError:
+            return (
+                "Sorry, the AI request could not be completed because your OpenAI quota has been exceeded. "
+                "Please check your OpenAI plan and billing details, or use a different API key."
+            )
+        except openai.OpenAIError:
+            return (
+                "Sorry, the AI service returned an error. Please check your API key, quota, and network connection. "
+                "If the problem persists, review your OpenAI account settings."
+            )
+
+
+def get_ai_assistant_response(user_input: str, user_email: str, chat_history: list) -> str:
+    if not is_openai_configured():
+        return (
+            "OPENAI_API_KEY was not found. Please add your OpenAI API key to the .env file and restart the app. "
+            "The key should be set as OPENAI_API_KEY=\"your-actual-api-key-here\"."
+        )
+
+    context_data = AppointmentDataStore(user_email).get_context()
+    bot = ClinicAssistantBot(api_key=OPENAI_API_KEY, context_data=context_data)
+    return bot.get_ai_response(chat_history)
 
 # ========== SCHEDULE MANAGEMENT (Doctor/Admin CRUD) ==========
 
@@ -141,6 +271,9 @@ def create_time_slot(doctor_email: str, date: str, time: str, duration_minutes: 
     """Create an available time slot for a doctor"""
     schedules = load_schedules()
     slot_id = f"{doctor_email}_{date}_{time}".replace(" ", "_").replace(":", "-")
+
+    if any(s["slot_id"] == slot_id for s in schedules["schedules"]):
+        return {"success": False, "message": "A time slot at this date and time already exists."}
     
     new_slot = {
         "slot_id": slot_id,
@@ -316,6 +449,42 @@ def update_appointment_notes(appointment_id: str, notes: str) -> dict:
     return {"success": True, "message": "Notes updated"}
 
 
+def get_week_dates(reference_date=None) -> list:
+    """Return a list of 7 sequential dates starting from the Monday of the reference week."""
+    current_date = reference_date if reference_date else datetime.now().date()
+    start_of_week = current_date - timedelta(days=current_date.weekday())
+    return [start_of_week + timedelta(days=i) for i in range(7)]
+
+
+def get_slots_by_day(slots: List[Dict]) -> Dict[str, List[Dict]]:
+    """Group slots by their date string."""
+    grouped = {}
+    for slot in slots:
+        grouped.setdefault(slot["date"], []).append(slot)
+    return grouped
+
+
+def create_recurring_slots(doctor_email: str, start_date, end_date, weekdays: List[int], time: str, duration_minutes: int, frequency_weeks: int = 1) -> dict:
+    """Create recurring time slots over a date range."""
+    if not weekdays:
+        return {"success": False, "message": "Please select at least one weekday."}
+
+    current_date = start_date
+    created = 0
+    while current_date <= end_date:
+        week_number = ((current_date - start_date).days // 7)
+        if week_number % frequency_weeks == 0 and current_date.weekday() in weekdays:
+            result = create_time_slot(doctor_email, current_date.strftime("%Y-%m-%d"), time, duration_minutes)
+            if result["success"]:
+                created += 1
+        current_date += timedelta(days=1)
+
+    if created == 0:
+        return {"success": False, "message": "No recurring slots were created. Check your date range or weekday selection."}
+
+    return {"success": True, "message": f"Created {created} recurring slot{'s' if created != 1 else ''}."}
+
+
 # ============ CHATBOT FUNCTION ============
 
 def get_chatbot_response(user_query: str, user_email: str, user_name: str) -> str:
@@ -367,7 +536,8 @@ def get_chatbot_response(user_query: str, user_email: str, user_name: str) -> st
 
 # ============ PAGE CONFIG AND INITIALIZATION ============
 
-st.set_page_config(page_title="Patient Appointment Tracker", layout="wide")
+st.set_page_config(page_title="Patient Appointment Tracker", layout="wide", page_icon="🏥")
+inject_global_styles()
 
 # Initialize session state
 if "logged_in" not in st.session_state:
@@ -381,20 +551,28 @@ if "logged_in" not in st.session_state:
 def sidebar_navigation():
     """Render sidebar with navigation and logout"""
     with st.sidebar:
-        st.title("🏥 Clinic Management")
-        
+        st.markdown(
+            """
+            <div style='padding: 18px 0 12px;'>
+                <h2 style='margin:0;color:#ffffff;'>🏥 Clinic Management</h2>
+                <p style='margin:8px 0 0;color:rgba(255,255,255,0.84);'>Modern patient scheduling with AI assistance.</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.divider()
+
         if st.session_state.logged_in:
-            st.write(f"**Logged in as:** {st.session_state.user['full_name']}")
-            st.write(f"**Role:** {st.session_state.user['role'].title()}")
+            st.markdown(f"**Logged in as:** {st.session_state.user['full_name']}")
+            st.markdown(f"**Role:** {st.session_state.user['role'].title()}")
             st.divider()
-            
             if st.button("🚪 Logout", use_container_width=True):
                 st.session_state.logged_in = False
                 st.session_state.user = None
                 st.session_state.page = "login"
                 st.rerun()
         else:
-            st.write("Please log in to continue")
+            st.info("Please log in to continue")
 
 
 # ============ AUTHENTICATION PAGES ============
@@ -467,8 +645,16 @@ def register_page():
 
 def patient_dashboard():
     """Patient dashboard with booking and appointment management"""
-    st.title("📋 Patient Dashboard")
-    st.write(f"Welcome, {st.session_state.user['full_name']}!")
+    st.markdown(
+        """
+        <div class='section-header'>
+          <h1>📋 Patient Dashboard</h1>
+          <p>Manage your appointments, ask the AI assistant, and stay informed in one place.</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.write(f"Welcome back, {st.session_state.user['full_name']}!")
     
     patient_email = st.session_state.user["email"]
     
@@ -525,6 +711,30 @@ def patient_dashboard():
                         st.error(result["message"])
         else:
             st.info("No available time slots at the moment. Please check back later!")
+
+        with st.expander("📆 Weekly Availability Calendar", expanded=True):
+            selected_week = st.date_input("Choose week starting", value=datetime.now().date(), key="patient_calendar_week")
+            week_dates = get_week_dates(selected_week)
+            day_slots = get_slots_by_day(available_slots)
+            calendar_cols = st.columns(7)
+
+            for date_obj, col in zip(week_dates, calendar_cols):
+                day_key = date_obj.strftime("%Y-%m-%d")
+                with col:
+                    st.markdown(f"**{date_obj.strftime('%a')}**<br>{date_obj.strftime('%b %d')}", unsafe_allow_html=True)
+                    slots_for_day = day_slots.get(day_key, [])
+                    if slots_for_day:
+                        for slot in slots_for_day:
+                            label = f"{slot['time']} ({slot['duration_minutes']}m)"
+                            if st.button(label, key=f"book_calendar_{slot['slot_id']}", use_container_width=True):
+                                result = book_appointment(patient_email, st.session_state.user["full_name"], slot["slot_id"])
+                                if result["success"]:
+                                    st.success(f"{result['message']} Appointment ID: {result['appointment_id']}")
+                                    st.rerun()
+                                else:
+                                    st.error(result["message"])
+                    else:
+                        st.write("No slots")
     
     # ========== TAB 2: MY APPOINTMENTS ==========
     with tab2:
@@ -562,15 +772,38 @@ def patient_dashboard():
     # ========== TAB 3: CHATBOT ASSISTANT ==========
     with tab3:
         st.subheader("💬 AI Assistant")
-        st.write("Ask me common questions about your appointments and the clinic!")
-        
-        user_question = st.text_area("Your Question", placeholder="e.g., When is my next appointment?")
-        
-        if st.button("Ask Assistant", use_container_width=True):
-            if user_question:
-                response = get_chatbot_response(user_question, patient_email, st.session_state.user["full_name"])
-                st.info(response)
-    
+        st.write("Ask questions about your appointments and clinic services. The assistant uses your appointment data to answer.")
+
+        if "chat_messages" not in st.session_state:
+            st.session_state.chat_messages = []
+            logs = ChatLoggerStore(CHAT_LOGS_FILE).load_logs()
+            for log in logs:
+                st.session_state.chat_messages.append({"role": "user", "content": log["user_message"]})
+                st.session_state.chat_messages.append({"role": "assistant", "content": log["assistant_message"]})
+
+        chat_container = st.container()
+        with chat_container:
+            for msg in st.session_state.chat_messages:
+                with st.chat_message(msg["role"]):
+                    st.markdown(msg["content"])
+
+        user_input = st.chat_input("Ask the clinic assistant…")
+        if user_input:
+            st.session_state.chat_messages.append({"role": "user", "content": user_input})
+            assistant_response = get_ai_assistant_response(
+                user_input,
+                patient_email,
+                st.session_state.chat_messages
+            )
+            st.session_state.chat_messages.append({"role": "assistant", "content": assistant_response})
+
+            chat_logger = ChatLoggerStore(CHAT_LOGS_FILE)
+            logs = chat_logger.load_logs()
+            logs.append({"user_message": user_input, "assistant_message": assistant_response})
+            chat_logger.save_logs(logs)
+
+            st.rerun()
+
     # ========== TAB 4: INSTRUCTIONS ==========
     with tab4:
         st.subheader("How to Use")
@@ -603,7 +836,15 @@ def patient_dashboard():
 
 def doctor_dashboard():
     """Doctor/Admin dashboard with schedule and appointment management"""
-    st.title("👨‍⚕️ Doctor Dashboard")
+    st.markdown(
+        """
+        <div class='section-header'>
+          <h1>👨‍⚕️ Doctor Dashboard</h1>
+          <p>Organize your schedule, manage patients, and track clinic performance.</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
     st.write(f"Welcome, Dr. {st.session_state.user['full_name']}!")
     
     doctor_email = st.session_state.user["email"]
@@ -642,7 +883,52 @@ def doctor_dashboard():
                     st.error(result["message"])
         
         st.divider()
-        
+
+        with st.expander("⚙️ Advanced Scheduling", expanded=False):
+            weekday_options = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+            selected_weekdays = st.multiselect("Repeat on", weekday_options, default=[weekday_options[0]])
+            recurring_start = st.date_input("Start Date", value=datetime.now().date(), key="recurring_start")
+            recurring_end = st.date_input("End Date", value=datetime.now().date() + timedelta(days=28), key="recurring_end")
+            recurring_time = st.time_input("Slot Time", value=datetime.strptime("09:00", "%H:%M").time(), key="recurring_slot_time")
+            recurring_duration = st.number_input("Duration (minutes)", value=30, min_value=15, max_value=120, step=15, key="recurring_duration")
+            recurring_frequency = st.selectbox("Repeat every", ["1 week", "2 weeks"], key="recurring_frequency")
+
+            if st.button("Create recurring slots", use_container_width=True):
+                weekdays_int = [weekday_options.index(day) for day in selected_weekdays]
+                frequency_weeks = 1 if recurring_frequency == "1 week" else 2
+                result = create_recurring_slots(
+                    doctor_email,
+                    recurring_start,
+                    recurring_end,
+                    weekdays_int,
+                    recurring_time.strftime("%H:%M"),
+                    recurring_duration,
+                    frequency_weeks
+                )
+                if result["success"]:
+                    st.success(result["message"])
+                    st.rerun()
+                else:
+                    st.error(result["message"])
+
+        with st.expander("📅 Weekly Schedule Calendar", expanded=True):
+            schedule_week = st.date_input("Week of", value=datetime.now().date(), key="doctor_calendar_week")
+            weekly_dates = get_week_dates(schedule_week)
+            schedule = get_doctor_schedule(doctor_email)
+            schedule_by_day = get_slots_by_day(schedule)
+            day_columns = st.columns(7)
+
+            for date_obj, col in zip(weekly_dates, day_columns):
+                with col:
+                    st.markdown(f"**{date_obj.strftime('%a %d %b')}**")
+                    slots_for_day = schedule_by_day.get(date_obj.strftime("%Y-%m-%d"), [])
+                    if slots_for_day:
+                        for slot in slots_for_day:
+                            status_badge = "🟢" if slot['status'] == 'available' else "🔴"
+                            st.write(f"{status_badge} {slot['time']} ({slot['duration_minutes']}m)")
+                    else:
+                        st.write("No slots")
+
         # View and delete time slots
         st.write("### Your Available Time Slots")
         schedule = get_doctor_schedule(doctor_email)

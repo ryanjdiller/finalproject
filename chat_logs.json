@@ -1,0 +1,14 @@
+[
+  {
+    "user_message": "Hello. Do I have an appointment",
+    "assistant_message": "OPENAI_API_KEY was not found. Please add your OpenAI API key to the .env file and restart the app. The key should be set as OPENAI_API_KEY=\"your-actual-api-key-here\"."
+  },
+  {
+    "user_message": "Hello do I have an appointment?",
+    "assistant_message": "OPENAI_API_KEY was not found. Please add your OpenAI API key to the .env file and restart the app. The key should be set as OPENAI_API_KEY=\"your-actual-api-key-here\"."
+  },
+  {
+    "user_message": "Hello do i have an appointment",
+    "assistant_message": "Sorry, the AI request could not be completed because your OpenAI quota has been exceeded. Please check your OpenAI plan and billing details, or use a different API key."
+  }
+]
