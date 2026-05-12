@@ -588,6 +588,8 @@ def login_page():
         email = st.text_input("Email")
         password = st.text_input("Password", type="password")
         
+        st.text_area("Test Account Information", value="Doctor: doctor123@clinic.com Password: password123\nPatient: patient123@clinic.com Password: password123", height=100)
+
         if st.button("Login", use_container_width=True):
             result = login_user(email, password)
             if result["success"]:
